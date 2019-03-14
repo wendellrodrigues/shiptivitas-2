@@ -1,5 +1,8 @@
 import express from 'express';
 import Database from 'better-sqlite3';
+import { stat } from 'fs';
+import { start } from 'repl';
+//const { printQueryResults } = require('./utils');
 
 const app = express();
 
@@ -51,7 +54,7 @@ const validateId = (id) => {
  * @param {any} priority
  */
 const validatePriority = (priority) => {
-  if (Number.isNaN(priority)) {
+  if (!Number.isNaN(priority)) {
     return {
       valid: false,
       messageObj: {
@@ -101,6 +104,42 @@ app.get('/api/v1/clients/:id', (req, res) => {
 });
 
 /**
+ * When an element is placed near the beginning of a list of priorities ,
+ * The other elements need to move down
+ * This func takes elements after where an element is moved to
+ * And changes their priorities (makes them +1 one at a time)
+ * @param {int} start     The beginning of the moving section of the array 
+ * @param {int} end       The end of the moving section of the array
+ * @param {array} array   The array that needs moving
+ * @param {int} priority  The priority that will be incremented in order to move other elements downward
+ */
+const moveElementsDown = (start, end, array, priority) => {
+  for(let i=start; i<end; i++) {
+    const id = array[i]
+    priority++
+    db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(priority, id);
+  }
+}
+
+/**
+ * When an element is placed near the end of a list of priorities,
+ * The other elements need to move up
+ * This func takes elements after where an element is moved to
+ * And changes their priorities (makes them -1 one at a time)
+ * @param {int} start     The beginning of the moving section of the array 
+ * @param {int} end       The end of the moving section of the array
+ * @param {array} array   The array that needs moving
+ * @param {int} priority  The priority that will be decremented in order to move other elements upward
+ */
+const moveElementsUp = (start, end, array, priority) => {
+  for(let i=end; i>start; i--) {
+    const id = array[i]
+    priority--
+    db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(priority, id);
+  }
+}
+
+/**
  * Update client information based on the parameters provided.
  * When status is provided, the client status will be changed
  * When priority is provided, the client priority will be changed with the rest of the clients accordingly
@@ -125,12 +164,179 @@ app.put('/api/v1/clients/:id', (req, res) => {
   let clients = db.prepare('select * from clients').all();
   const client = clients.find(client => client.id === id);
 
+
   /* ---------- Update code below ----------*/
 
+  // console.log('isvalid', isValid);
+  // console.log('priority', priority);
+  // if(!isValid) return res.status(400).json({"status": "invalid"})
+
+  //Make an array of this swimlane, and extract the client ids 
+  let thisClientStatus = null;
+  for(let client of clients) {
+    if(client.id === id) {
+      thisClientStatus = client.status;
+    }
+  };
+  const thisSwimLane = [];
+  for(let client of clients) {
+    if(client.status === thisClientStatus) {
+      thisSwimLane.push(client);
+    }
+  };
 
 
-  return res.status(200).send(clients);
+  //Create helper func for sorting the swimlane from least priority -> greatest priority
+  function compare(a, b)  {
+    if (a.priority < b.priority) return -1;
+    if (a.priority > b.priority) return 1;
+    return 0;
+  };
+
+  const sortedByPriority = thisSwimLane.sort(compare);
+
+  //Get Id from sorted swimlane array
+  const sortedIdsThisSwimlane = []
+  for(let client of sortedByPriority) {
+    sortedIdsThisSwimlane.push(client.id)
+  }
+
+  //Get swimlane of target (to be moved to)
+  const targetSwimLane = [];
+  for(let client of clients) {
+    if(client.status === status) {
+      targetSwimLane.push(client);
+    }
+  };
+
+
+   //Same Swimlane
+  if(status === client.status) {
+
+    const initialPriority = client.priority;
+    const startPriority = initialPriority - 1;
+    const endPriority = priority - 1;
+
+    //If moving element higher up in the array
+    if(client.priority > priority) {
+      //Set priority of the element to be moved
+      db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(priority, id);
+      //Move other elements downward
+      moveElementsDown(startPriority, endPriority, sortedIdsThisSwimlane, priority);
+    }
+    //If moving element lower down in the array
+    else if(client.priority < priority) {
+      //Set priority of the element to be moved
+      db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(priority, id);
+      //Move other elements upward
+      moveElementsUp(startPriority, endPriority, sortedIdsThisSwimlane, priority);
+    }
+  } 
+
+  //Different Swimlane
+  else {
+
+   //Get start and end priority
+    const initialPriority = client.priority;
+    const startPriority = initialPriority-1 ;
+    const endPriority = thisSwimLane.length-1;
+
+    //Move priority positions UP in current swimlane
+    moveElementsUp(startPriority, endPriority, sortedIdsThisSwimlane, priority);
+
+    //Remove element from current Swimlane (change status)
+    client.status = status;
+
+    //Move priority positions DOWN in target swimlane
+
+
+    //Add element to target Swimlane
+  }
+
+
+
+  //setNormal();
+    
+  const theseClients = []
+  for(let client of clients) {
+    if(client.status==='in-progress'){
+      theseClients.push(client)
+    }
+  }
+ 
+
+
+  return res.status(200).send(theseClients); //Change back to all clients when done
 });
 
+/**
+ * Helper function that sets everything back to normal, for testing
+ */
+const setNormal = () => {
+  
+    //Everything in in-progress back to normal
+    db.prepare("UPDATE clients SET STATUS = ? WHERE id = ?").run('in-progress',  1);    //Sets Stark 
+    db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(1,  1);              //Sets Stark 
+
+    db.prepare("UPDATE clients SET STATUS = ? WHERE id = ?").run('complete',  2);       //Sets Wiza
+    db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(1,  2);              //Sets Wiza
+
+    db.prepare("UPDATE clients SET STATUS = ? WHERE id = ?").run('backlog',  3);        //Sets Nolan
+    db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(1,  3);              //Sets Nolan
+
+    db.prepare("UPDATE clients SET STATUS = ? WHERE id = ?").run('in-progress',  4);    //Sets Thompson
+    db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(2,  4);              //Sets Thompson
+
+    db.prepare("UPDATE clients SET STATUS = ? WHERE id = ?").run('in-progress',  5);    //Sets Walker Williamson
+    db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(3,  5);              //Sets Walker Williamson
+
+    db.prepare("UPDATE clients SET STATUS = ? WHERE id = ?").run('backlog',  6);        //Sets Boehm
+    db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(2,  6);              //Sets Boehm
+
+    db.prepare("UPDATE clients SET STATUS = ? WHERE id = ?").run('backlog',  7);        //Sets Runolfson
+    db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(3,  7);              //Sets Runolfson
+
+    db.prepare("UPDATE clients SET STATUS = ? WHERE id = ?").run('backlog',  8);        //Sets Shumm
+    db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(4,  8);              //Sets Shumm
+
+    db.prepare("UPDATE clients SET STATUS = ? WHERE id = ?").run('backlog',  9);        //Sets Kohler
+    db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(5,  9);              //Sets Kohler
+
+    db.prepare("UPDATE clients SET STATUS = ? WHERE id = ?").run('backlog',  10);        //Sets Romaguera
+    db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(6,  10);              //Sets Romaguera
+
+    db.prepare("UPDATE clients SET STATUS = ? WHERE id = ?").run('complete',  11);       //Sets Rielley
+    db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(2,  11);              //Sets Rielley
+
+    db.prepare("UPDATE clients SET STATUS = ? WHERE id = ?").run('backlog',  12);        //Sets Emard
+    db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(7,  12);              //Sets Emard
+
+    db.prepare("UPDATE clients SET STATUS = ? WHERE id = ?").run('complete',  13);       //Sets Fritzsh
+    db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(3,  13);              //Sets Fritzsh
+
+    db.prepare("UPDATE clients SET STATUS = ? WHERE id = ?").run('backlog',  14);        //Sets Borer
+    db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(8,  14);              //Sets Borer
+
+    db.prepare("UPDATE clients SET STATUS = ? WHERE id = ?").run('in-progress',  15);    //Sets Emerich
+    db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(4,  15);              //Sets Emerich
+
+    db.prepare("UPDATE clients SET STATUS = ? WHERE id = ?").run('in-progress',  16);    //Sets Wilms
+    db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(5,  16);              //Sets Wilms
+
+    db.prepare("UPDATE clients SET STATUS = ? WHERE id = ?").run('complete',  17);       //Sets Brekke
+    db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(4,  17);              //Sets Brekke
+
+    db.prepare("UPDATE clients SET STATUS = ? WHERE id = ?").run('backlog',  18);        //Sets Bins
+    db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(9,  18);              //Sets Bins
+
+    db.prepare("UPDATE clients SET STATUS = ? WHERE id = ?").run('backlog',  19);        //Sets Hodkiewicz
+    db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(10,  19);             //Sets Hodkiewicz
+
+    db.prepare("UPDATE clients SET STATUS = ? WHERE id = ?").run('backlog',  20);        //Sets Murphy
+    db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(11,  20);             //Sets Murphy
+}
+
 app.listen(3001);
+
 console.log('app running on port ', 3001);
+
