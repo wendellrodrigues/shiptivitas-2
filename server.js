@@ -2,7 +2,7 @@ import express from 'express';
 import Database from 'better-sqlite3';
 import { stat } from 'fs';
 import { start } from 'repl';
-//const { printQueryResults } = require('./utils');
+
 
 const app = express();
 
@@ -51,20 +51,21 @@ const validateId = (id) => {
 
 /**
  * Validate priority input
+ * FIXED THIS >>> Does not need 
  * @param {any} priority
  */
 const validatePriority = (priority) => {
-  if (!Number.isNaN(priority)) {
+  if(Number.isNaN(priority)) {
     return {
-      valid: false,
-      messageObj: {
+      validPriority: false,
+      message: {
       'message': 'Invalid priority provided.',
       'long_message': 'Priority can only be positive integer.',
       },
     };
   }
   return {
-    valid: true,
+    validPriority: true,
   }
 }
 
@@ -115,8 +116,8 @@ app.get('/api/v1/clients/:id', (req, res) => {
  */
 const moveElementsDown = (start, end, array, priority) => {
   for(let i=start; i<end; i++) {
-    const id = array[i]
-    priority++
+    const id = array[i];
+    priority++;
     db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(priority, id);
   }
 }
@@ -133,8 +134,8 @@ const moveElementsDown = (start, end, array, priority) => {
  */
 const moveElementsUp = (start, end, array, priority) => {
   for(let i=end; i>start; i--) {
-    const id = array[i]
-    priority--
+    const id = array[i];
+    priority--;
     db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(priority, id);
   }
 }
@@ -164,12 +165,10 @@ app.put('/api/v1/clients/:id', (req, res) => {
   let clients = db.prepare('select * from clients').all();
   const client = clients.find(client => client.id === id);
 
+  console.log('priority in main', priority);
+
 
   /* ---------- Update code below ----------*/
-
-  // console.log('isvalid', isValid);
-  // console.log('priority', priority);
-  // if(!isValid) return res.status(400).json({"status": "invalid"})
 
   //Make an array of this swimlane, and extract the client ids 
   let thisClientStatus = null;
@@ -178,13 +177,14 @@ app.put('/api/v1/clients/:id', (req, res) => {
       thisClientStatus = client.status;
     }
   };
+
+  //If status isnt given, 
   const thisSwimLane = [];
   for(let client of clients) {
     if(client.status === thisClientStatus) {
       thisSwimLane.push(client);
     }
   };
-
 
   //Create helper func for sorting the swimlane from least priority -> greatest priority
   function compare(a, b)  {
@@ -193,12 +193,12 @@ app.put('/api/v1/clients/:id', (req, res) => {
     return 0;
   };
 
-  const sortedByPriority = thisSwimLane.sort(compare);
+  const sortedByPriorityThis = thisSwimLane.sort(compare);
 
   //Get Id from sorted swimlane array
   const sortedIdsThisSwimlane = []
-  for(let client of sortedByPriority) {
-    sortedIdsThisSwimlane.push(client.id)
+  for(let client of sortedByPriorityThis) {
+    sortedIdsThisSwimlane.push(client.id);
   }
 
   //Get swimlane of target (to be moved to)
@@ -209,64 +209,66 @@ app.put('/api/v1/clients/:id', (req, res) => {
     }
   };
 
+  const sortedByPriorityTarget = targetSwimLane.sort(compare);
+
+  const sortedIdsTargetSwimlane = []
+  for(let client of sortedByPriorityTarget) {
+    sortedIdsTargetSwimlane.push(client.id);
+  }
 
    //Same Swimlane
   if(status === client.status) {
-
-    const initialPriority = client.priority;
-    const startPriority = initialPriority - 1;
-    const endPriority = priority - 1;
-
+    //If priority inputted from body is greater than swimlength's greatest value priority, set to max number
+    //THIS MAY BREAK STUF 
+    if(priority > thisSwimLane.length){
+      priority = thisSwimLane.length;
+    }
     //If moving element higher up in the array
     if(client.priority > priority) {
-      //Set priority of the element to be moved
-      db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(priority, id);
+      const startPriority = priority - 1;
+      const endPriority = client.priority - 1;
       //Move other elements downward
       moveElementsDown(startPriority, endPriority, sortedIdsThisSwimlane, priority);
+      //Set priority of the element to be moved
+      db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(priority, id);
     }
     //If moving element lower down in the array
     else if(client.priority < priority) {
+      const startPriority = client.priority - 1;
+      const endPriority = priority - 1;
+       //Move other elements upward
+       moveElementsUp(startPriority, endPriority, sortedIdsThisSwimlane, priority);
       //Set priority of the element to be moved
       db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(priority, id);
-      //Move other elements upward
-      moveElementsUp(startPriority, endPriority, sortedIdsThisSwimlane, priority);
     }
   } 
 
   //Different Swimlane
   else {
+    //If priority inputted from body is greater than swimlength's greatest value priority, set to max number
+    if(priority > targetSwimLane.length){
+      priority = targetSwimLane.length + 1;
+    }
 
-   //Get start and end priority
-    const initialPriority = client.priority;
-    const startPriority = initialPriority-1 ;
-    const endPriority = thisSwimLane.length-1;
+    //Get start and end priority
+    const startThisPriority = client.priority - 1;
+    const endThisPriority = thisSwimLane.length - 1;
 
     //Move priority positions UP in current swimlane
-    moveElementsUp(startPriority, endPriority, sortedIdsThisSwimlane, priority);
-
-    //Remove element from current Swimlane (change status)
-    client.status = status;
+    const priorityAtEnd = thisSwimLane[thisSwimLane.length-1].priority;
+    moveElementsUp(startThisPriority, endThisPriority, sortedIdsThisSwimlane, priorityAtEnd);
 
     //Move priority positions DOWN in target swimlane
+    const startTargetPriority = priority - 1;
+    const endTargetPriority = targetSwimLane.length;
+    moveElementsDown(startTargetPriority, endTargetPriority, sortedIdsTargetSwimlane, priority);
 
-
-    //Add element to target Swimlane
+    //(change status and priority to whats specified in body of request)
+    db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(priority, id);
+    db.prepare("UPDATE clients SET STATUS = ? WHERE id = ?").run(status, id);
   }
 
-
-
-  //setNormal();
-    
-  const theseClients = []
-  for(let client of clients) {
-    if(client.status==='in-progress'){
-      theseClients.push(client)
-    }
-  }
- 
-
-
-  return res.status(200).send(theseClients); //Change back to all clients when done
+  return res.status(200).send(clients); 
 });
 
 /**
@@ -339,4 +341,3 @@ const setNormal = () => {
 app.listen(3001);
 
 console.log('app running on port ', 3001);
-
