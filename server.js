@@ -51,7 +51,6 @@ const validateId = (id) => {
 
 /**
  * Validate priority input
- * FIXED THIS >>> Does not need 
  * @param {any} priority
  */
 const validatePriority = (priority) => {
@@ -165,10 +164,21 @@ app.put('/api/v1/clients/:id', (req, res) => {
   let clients = db.prepare('select * from clients').all();
   const client = clients.find(client => client.id === id);
 
-  console.log('priority in main', priority);
-
 
   /* ---------- Update code below ----------*/
+
+  //Checks to see if priority is valid
+  if(priority) {
+    const { validPriority, message } = validatePriority(priority);
+    if(!validPriority) {
+      res.status(400).send(message)
+    }
+  }
+
+  //Check if 'Do Nothing' clause (same swimlane and no priority given)
+  if(!priority && client.status === status) {
+    return res.status(200).send(clients);
+  }
 
   //Make an array of this swimlane, and extract the client ids 
   let thisClientStatus = null;
@@ -193,6 +203,7 @@ app.put('/api/v1/clients/:id', (req, res) => {
     return 0;
   };
 
+  //Sorted this swimline by priority
   const sortedByPriorityThis = thisSwimLane.sort(compare);
 
   //Get Id from sorted swimlane array
@@ -209,6 +220,7 @@ app.put('/api/v1/clients/:id', (req, res) => {
     }
   };
 
+  //Sorted target swimline by priority
   const sortedByPriorityTarget = targetSwimLane.sort(compare);
 
   const sortedIdsTargetSwimlane = []
@@ -219,7 +231,6 @@ app.put('/api/v1/clients/:id', (req, res) => {
    //Same Swimlane
   if(status === client.status) {
     //If priority inputted from body is greater than swimlength's greatest value priority, set to max number
-    //THIS MAY BREAK STUF 
     if(priority > thisSwimLane.length){
       priority = thisSwimLane.length;
     }
@@ -246,7 +257,8 @@ app.put('/api/v1/clients/:id', (req, res) => {
   //Different Swimlane
   else {
     //If priority inputted from body is greater than swimlength's greatest value priority, set to max number
-    if(priority > targetSwimLane.length){
+    //Or if priority is not specified, move to end of target array 
+    if(priority > targetSwimLane.length || !priority){
       priority = targetSwimLane.length + 1;
     }
 
@@ -270,73 +282,6 @@ app.put('/api/v1/clients/:id', (req, res) => {
 
   return res.status(200).send(clients); 
 });
-
-/**
- * Helper function that sets everything back to normal, for testing
- */
-const setNormal = () => {
-  
-    //Everything in in-progress back to normal
-    db.prepare("UPDATE clients SET STATUS = ? WHERE id = ?").run('in-progress',  1);    //Sets Stark 
-    db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(1,  1);              //Sets Stark 
-
-    db.prepare("UPDATE clients SET STATUS = ? WHERE id = ?").run('complete',  2);       //Sets Wiza
-    db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(1,  2);              //Sets Wiza
-
-    db.prepare("UPDATE clients SET STATUS = ? WHERE id = ?").run('backlog',  3);        //Sets Nolan
-    db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(1,  3);              //Sets Nolan
-
-    db.prepare("UPDATE clients SET STATUS = ? WHERE id = ?").run('in-progress',  4);    //Sets Thompson
-    db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(2,  4);              //Sets Thompson
-
-    db.prepare("UPDATE clients SET STATUS = ? WHERE id = ?").run('in-progress',  5);    //Sets Walker Williamson
-    db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(3,  5);              //Sets Walker Williamson
-
-    db.prepare("UPDATE clients SET STATUS = ? WHERE id = ?").run('backlog',  6);        //Sets Boehm
-    db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(2,  6);              //Sets Boehm
-
-    db.prepare("UPDATE clients SET STATUS = ? WHERE id = ?").run('backlog',  7);        //Sets Runolfson
-    db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(3,  7);              //Sets Runolfson
-
-    db.prepare("UPDATE clients SET STATUS = ? WHERE id = ?").run('backlog',  8);        //Sets Shumm
-    db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(4,  8);              //Sets Shumm
-
-    db.prepare("UPDATE clients SET STATUS = ? WHERE id = ?").run('backlog',  9);        //Sets Kohler
-    db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(5,  9);              //Sets Kohler
-
-    db.prepare("UPDATE clients SET STATUS = ? WHERE id = ?").run('backlog',  10);        //Sets Romaguera
-    db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(6,  10);              //Sets Romaguera
-
-    db.prepare("UPDATE clients SET STATUS = ? WHERE id = ?").run('complete',  11);       //Sets Rielley
-    db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(2,  11);              //Sets Rielley
-
-    db.prepare("UPDATE clients SET STATUS = ? WHERE id = ?").run('backlog',  12);        //Sets Emard
-    db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(7,  12);              //Sets Emard
-
-    db.prepare("UPDATE clients SET STATUS = ? WHERE id = ?").run('complete',  13);       //Sets Fritzsh
-    db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(3,  13);              //Sets Fritzsh
-
-    db.prepare("UPDATE clients SET STATUS = ? WHERE id = ?").run('backlog',  14);        //Sets Borer
-    db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(8,  14);              //Sets Borer
-
-    db.prepare("UPDATE clients SET STATUS = ? WHERE id = ?").run('in-progress',  15);    //Sets Emerich
-    db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(4,  15);              //Sets Emerich
-
-    db.prepare("UPDATE clients SET STATUS = ? WHERE id = ?").run('in-progress',  16);    //Sets Wilms
-    db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(5,  16);              //Sets Wilms
-
-    db.prepare("UPDATE clients SET STATUS = ? WHERE id = ?").run('complete',  17);       //Sets Brekke
-    db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(4,  17);              //Sets Brekke
-
-    db.prepare("UPDATE clients SET STATUS = ? WHERE id = ?").run('backlog',  18);        //Sets Bins
-    db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(9,  18);              //Sets Bins
-
-    db.prepare("UPDATE clients SET STATUS = ? WHERE id = ?").run('backlog',  19);        //Sets Hodkiewicz
-    db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(10,  19);             //Sets Hodkiewicz
-
-    db.prepare("UPDATE clients SET STATUS = ? WHERE id = ?").run('backlog',  20);        //Sets Murphy
-    db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(11,  20);             //Sets Murphy
-}
 
 app.listen(3001);
 
