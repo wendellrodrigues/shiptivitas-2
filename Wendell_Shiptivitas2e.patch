@@ -1,0 +1,208 @@
+diff --git a/clients.db b/clients.db
+index 8ba5485..bd79177 100644
+Binary files a/clients.db and b/clients.db differ
+diff --git a/server.js b/server.js
+index 7ba16d7..b1c671c 100644
+--- a/server.js
++++ b/server.js
+@@ -1,5 +1,8 @@
+ import express from 'express';
+ import Database from 'better-sqlite3';
++import { stat } from 'fs';
++import { start } from 'repl';
++
+ 
+ const app = express();
+ 
+@@ -51,17 +54,17 @@ const validateId = (id) => {
+  * @param {any} priority
+  */
+ const validatePriority = (priority) => {
+-  if (Number.isNaN(priority)) {
++  if(Number.isNaN(priority)) {
+     return {
+-      valid: false,
+-      messageObj: {
++      validPriority: false,
++      message: {
+       'message': 'Invalid priority provided.',
+       'long_message': 'Priority can only be positive integer.',
+       },
+     };
+   }
+   return {
+-    valid: true,
++    validPriority: true,
+   }
+ }
+ 
+@@ -100,6 +103,42 @@ app.get('/api/v1/clients/:id', (req, res) => {
+   return res.status(200).send(db.prepare('select * from clients where id = ?').get(id));
+ });
+ 
++/**
++ * When an element is placed near the beginning of a list of priorities ,
++ * The other elements need to move down
++ * This func takes elements after where an element is moved to
++ * And changes their priorities (makes them +1 one at a time)
++ * @param {int} start     The beginning of the moving section of the array 
++ * @param {int} end       The end of the moving section of the array
++ * @param {array} array   The array that needs moving
++ * @param {int} priority  The priority that will be incremented in order to move other elements downward
++ */
++const moveElementsDown = (start, end, array, priority) => {
++  for(let i=start; i<end; i++) {
++    const id = array[i];
++    priority++;
++    db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(priority, id);
++  }
++}
++
++/**
++ * When an element is placed near the end of a list of priorities,
++ * The other elements need to move up
++ * This func takes elements after where an element is moved to
++ * And changes their priorities (makes them -1 one at a time)
++ * @param {int} start     The beginning of the moving section of the array 
++ * @param {int} end       The end of the moving section of the array
++ * @param {array} array   The array that needs moving
++ * @param {int} priority  The priority that will be decremented in order to move other elements upward
++ */
++const moveElementsUp = (start, end, array, priority) => {
++  for(let i=end; i>start; i--) {
++    const id = array[i];
++    priority--;
++    db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(priority, id);
++  }
++}
++
+ /**
+  * Update client information based on the parameters provided.
+  * When status is provided, the client status will be changed
+@@ -125,12 +164,125 @@ app.put('/api/v1/clients/:id', (req, res) => {
+   let clients = db.prepare('select * from clients').all();
+   const client = clients.find(client => client.id === id);
+ 
++
+   /* ---------- Update code below ----------*/
+ 
++  //Checks to see if priority is valid
++  if(priority) {
++    const { validPriority, message } = validatePriority(priority);
++    if(!validPriority) {
++      res.status(400).send(message)
++    }
++  }
++
++  //Check if 'Do Nothing' clause (same swimlane and no priority given)
++  if(!priority && client.status === status) {
++    return res.status(200).send(clients);
++  }
+ 
++  //Make an array of this swimlane, and extract the client ids 
++  let thisClientStatus = null;
++  for(let client of clients) {
++    if(client.id === id) {
++      thisClientStatus = client.status;
++    }
++  };
+ 
+-  return res.status(200).send(clients);
++  //If status isnt given, 
++  const thisSwimLane = [];
++  for(let client of clients) {
++    if(client.status === thisClientStatus) {
++      thisSwimLane.push(client);
++    }
++  };
++
++  //Create helper func for sorting the swimlane from least priority -> greatest priority
++  function compare(a, b)  {
++    if (a.priority < b.priority) return -1;
++    if (a.priority > b.priority) return 1;
++    return 0;
++  };
++
++  //Sorted this swimline by priority
++  const sortedByPriorityThis = thisSwimLane.sort(compare);
++
++  //Get Id from sorted swimlane array
++  const sortedIdsThisSwimlane = []
++  for(let client of sortedByPriorityThis) {
++    sortedIdsThisSwimlane.push(client.id);
++  }
++
++  //Get swimlane of target (to be moved to)
++  const targetSwimLane = [];
++  for(let client of clients) {
++    if(client.status === status) {
++      targetSwimLane.push(client);
++    }
++  };
++
++  //Sorted target swimline by priority
++  const sortedByPriorityTarget = targetSwimLane.sort(compare);
++
++  const sortedIdsTargetSwimlane = []
++  for(let client of sortedByPriorityTarget) {
++    sortedIdsTargetSwimlane.push(client.id);
++  }
++
++   //Same Swimlane
++  if(status === client.status) {
++    //If priority inputted from body is greater than swimlength's greatest value priority, set to max number
++    if(priority > thisSwimLane.length){
++      priority = thisSwimLane.length;
++    }
++    //If moving element higher up in the array
++    if(client.priority > priority) {
++      const startPriority = priority - 1;
++      const endPriority = client.priority - 1;
++      //Move other elements downward
++      moveElementsDown(startPriority, endPriority, sortedIdsThisSwimlane, priority);
++      //Set priority of the element to be moved
++      db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(priority, id);
++    }
++    //If moving element lower down in the array
++    else if(client.priority < priority) {
++      const startPriority = client.priority - 1;
++      const endPriority = priority - 1;
++       //Move other elements upward
++       moveElementsUp(startPriority, endPriority, sortedIdsThisSwimlane, priority);
++      //Set priority of the element to be moved
++      db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(priority, id);
++    }
++  } 
++
++  //Different Swimlane
++  else {
++    //If priority inputted from body is greater than swimlength's greatest value priority, set to max number
++    //Or if priority is not specified, move to end of target array 
++    if(priority > targetSwimLane.length || !priority){
++      priority = targetSwimLane.length + 1;
++    }
++
++    //Get start and end priority
++    const startThisPriority = client.priority - 1;
++    const endThisPriority = thisSwimLane.length - 1;
++
++    //Move priority positions UP in current swimlane
++    const priorityAtEnd = thisSwimLane[thisSwimLane.length-1].priority;
++    moveElementsUp(startThisPriority, endThisPriority, sortedIdsThisSwimlane, priorityAtEnd);
++
++    //Move priority positions DOWN in target swimlane
++    const startTargetPriority = priority - 1;
++    const endTargetPriority = targetSwimLane.length;
++    moveElementsDown(startTargetPriority, endTargetPriority, sortedIdsTargetSwimlane, priority);
++
++    //(change status and priority to whats specified in body of request)
++    db.prepare("UPDATE clients SET PRIORITY = ? WHERE id = ?").run(priority, id);
++    db.prepare("UPDATE clients SET STATUS = ? WHERE id = ?").run(status, id);
++  }
++
++  return res.status(200).send(clients); 
+ });
+ 
+ app.listen(3001);
++
+ console.log('app running on port ', 3001);
